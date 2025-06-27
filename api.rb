@@ -1,105 +1,136 @@
-require 'sinatra'
+#!/usr/bin/env ruby
+# encoding: utf-8
+
+require 'webrick'
 require 'json'
-require 'logger'
 
-configure do
-  # Настройка логгера
-  logger = Logger.new('logs/application.log', 'daily')
-  logger.level = Logger::INFO
-  set :logger, logger
+# Словарь транслитерации
+TRANSLIT_MAP = {
+  'а' => 'a', 'А' => 'A', 'б' => 'b', 'Б' => 'B',
+  'в' => 'v', 'В' => 'V', 'г' => 'g', 'Г' => 'G',
+  'д' => 'd', 'Д' => 'D', 'е' => 'e', 'Е' => 'E',
+  'ж' => 'j', 'Ж' => 'J', 'з' => 'z', 'З' => 'Z',
+  'и' => 'i', 'И' => 'I', 'й' => 'i', 'Й' => 'I',
+  'к' => 'k', 'К' => 'K', 'л' => 'l', 'Л' => 'L',
+  'м' => 'm', 'М' => 'M', 'н' => 'n', 'Н' => 'N',
+  'о' => 'o', 'О' => 'O', 'п' => 'p', 'П' => 'P',
+  'р' => 'r', 'Р' => 'R', 'с' => 's', 'С' => 'S',
+  'т' => 't', 'Т' => 'T', 'у' => 'u', 'У' => 'U',
+  'ф' => 'f', 'Ф' => 'F', 'х' => 'h', 'Х' => 'H',
+  'ы' => 'y', 'Ы' => 'Y', 'ь' => '', 'Ь' => '',
   
-  # Настройка CORS для API
-  set :bind, '0.0.0.0'
-  set :port, 4567
-  set :show_exceptions, false
-end
+  # Казахские буквы
+  'ә' => 'ä', 'Ә' => 'Ä', 'і' => 'ı', 'І' => 'I',
+  'ң' => 'ŋ', 'Ң' => 'Ŋ', 'ғ' => 'ğ', 'Ғ' => 'Ğ',
+  'ү' => 'ü', 'Ү' => 'Ü', 'ұ' => 'ū', 'Ұ' => 'Ū',
+  'қ' => 'q', 'Қ' => 'Q', 'ө' => 'ö', 'Ө' => 'Ö',
+  'һ' => 'h', 'Һ' => 'H'
+}
 
-# Словарь для замены символов (строчные и заглавные)
-TRANSLIT_DICT = {
-  "й" => "i", "Й" => "I", "и" => "i", "И" => "I", "у" => "u", "У" => "U", "к" => "k", "К" => "K",
-  "е" => "e", "Е" => "E", "н" => "n", "Н" => "N", "г" => "g", "Г" => "G", "ш" => "ş", "Ш" => "Ş",
-  "з" => "z", "З" => "Z", "х" => "h", "Х" => "H", "ф" => "f", "Ф" => "F", "ы" => "y", "Ы" => "Y",
-  "в" => "v", "В" => "V", "а" => "a", "А" => "A", "п" => "p", "П" => "P", "р" => "r", "Р" => "R",
-  "о" => "o", "О" => "O", "л" => "l", "Л" => "L", "д" => "d", "Д" => "D", "ж" => "j", "Ж" => "J",
-  "с" => "s", "С" => "S", "м" => "m", "М" => "M", "т" => "t", "Т" => "T", "ь" => "'", "Ь" => "'",
-  "б" => "b", "Б" => "B", "ё" => "e", "Ё" => "E", "ә" => "ä", "Ә" => "Ä", "і" => "ı", "І" => "I",
-  "ң" => "ŋ", "Ң" => "Ŋ", "ғ" => "ğ", "Ғ" => "Ğ", "ү" => "ü", "Ү" => "Ü", "ұ" => "ū", "Ұ" => "Ū",
-  "қ" => "q", "Қ" => "Q", "ө" => "ö", "Ө" => "Ö", "һ" => "h", "Һ" => "H"
-}.freeze
-
-# Вспомогательные методы
-helpers do
-  def json_response(status_code, data)
-    content_type :json
-    status status_code
-    data.to_json
-  end
-
-  def transliterate(text)
-    return '' if text.nil? || text.empty?
-    text.chars.map { |char| TRANSLIT_DICT[char] || char }.join
-  end
-end
-
-# CORS headers
-before do
-  headers({
-    'Access-Control-Allow-Origin' => '*',
-    'Access-Control-Allow-Methods' => ['POST', 'OPTIONS'],
-    'Access-Control-Allow-Headers' => 'Content-Type'
-  })
-end
-
-# Options для CORS preflight requests
-options '/transliterate' do
-  200
-end
-
-# Основной маршрут для транслитерации
-post '/transliterate' do
-  begin
-    request_data = JSON.parse(request.body.read)
+class APIServlet < WEBrick::HTTPServlet::AbstractServlet
+  def service(req, res)
+    # CORS headers
+    res['Access-Control-Allow-Origin'] = '*'
+    res['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    res['Access-Control-Allow-Headers'] = 'Content-Type'
     
-    # Проверка наличия текста
-    unless request_data.key?('text')
-      return json_response(400, { error: 'Missing required parameter: text' })
+    case req.request_method
+    when 'OPTIONS'
+      res.status = 200
+    when 'GET'
+      handle_get(req, res)
+    when 'POST'
+      handle_post(req, res)
+    else
+      send_error(res, 405, 'Method not allowed')
     end
+  end
 
-    text = request_data['text'].to_s
-    transliterated_text = transliterate(text)
-    
-    # Логирование успешного запроса
-    settings.logger.info("Successfully transliterated text. Length: #{text.length}")
-    
-    json_response(200, {
-      original: text,
-      transliterated: transliterated_text,
-      timestamp: Time.now.utc.iso8601
-    })
-    
-  rescue JSON::ParserError => e
-    settings.logger.error("JSON parsing error: #{e.message}")
-    json_response(400, { error: 'Invalid JSON format' })
-  rescue StandardError => e
-    settings.logger.error("Unexpected error: #{e.message}")
-    json_response(500, { error: 'Internal server error' })
+  private
+
+  def handle_get(req, res)
+    case req.path
+    when '/'
+      send_json(res, {
+        message: "Kazakh Transliteration API",
+        endpoints: [
+          "POST /transliterate",
+          "GET /health"
+        ],
+        example: { text: "Салем алем" }
+      })
+    when '/health'
+      send_json(res, { status: 'ok' })
+    else
+      send_error(res, 404, 'Not found')
+    end
+  end
+
+  def handle_post(req, res)
+    case req.path
+    when '/transliterate'
+      handle_transliterate(req, res)
+    else
+      send_error(res, 404, 'Not found')
+    end
+  end
+
+  def handle_transliterate(req, res)
+    begin
+      body = req.body
+      if body.nil? || body.empty?
+        return send_error(res, 400, 'Empty body')
+      end
+
+      data = JSON.parse(body)
+      text = data['text']
+      
+      if text.nil? || text.to_s.empty?
+        return send_error(res, 400, 'Text required')
+      end
+      
+      # Транслитерация
+      result = text.to_s.chars.map { |char| TRANSLIT_MAP[char] || char }.join
+      
+      send_json(res, {
+        original: text.to_s,
+        transliterated: result
+      })
+      
+    rescue JSON::ParserError
+      send_error(res, 400, 'Invalid JSON')
+    rescue => e
+      send_error(res, 500, 'Server error')
+    end
+  end
+
+  def send_json(res, data)
+    res.status = 200
+    res.content_type = 'application/json; charset=utf-8'
+    res.body = data.to_json
+  end
+
+  def send_error(res, status, message)
+    res.status = status
+    res.content_type = 'application/json; charset=utf-8'
+    res.body = { error: message }.to_json
   end
 end
 
-# Маршрут для проверки здоровья сервиса
-get '/health' do
-  json_response(200, { 
-    status: 'ok',
-    version: '1.0.0',
-    timestamp: Time.now.utc.iso8601
-  })
-end
-
-# Обработка ошибок
-not_found do
-  json_response(404, { error: 'Route not found' })
-end
-
-error do
-  json_response(500, { error: 'Internal server error' })
+# Запуск сервера
+if __FILE__ == $0
+  server = WEBrick::HTTPServer.new(
+    Port: 4567,
+    Logger: WEBrick::Log.new(nil, WEBrick::Log::ERROR),
+    AccessLog: []
+  )
+  
+  server.mount('/', APIServlet)
+  
+  trap('INT') { server.shutdown }
+  
+  puts "Kazakh API server started on http://localhost:4567"
+  puts "Press Ctrl+C to stop"
+  
+  server.start
 end

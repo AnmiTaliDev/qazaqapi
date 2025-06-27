@@ -1,4 +1,4 @@
-name: Kazakh Transliteration API CI
+name: Kazakh Transliteration API
 
 on:
   push:
@@ -26,59 +26,20 @@ jobs:
         bundler-cache: true
     
     - name: Install dependencies
-      run: |
-        gem install bundler
-        bundle install
-    
-    - name: Create test file
-      run: |
-        cat > test_app.rb << 'EOL'
-        require 'minitest/autorun'
-        require 'rack/test'
-        require_relative 'app'
-        
-        class KazakhTransliterationTest < Minitest::Test
-          include Rack::Test::Methods
-          
-          def app
-            Sinatra::Application
-          end
-          
-          def test_kazakh_specific_letters
-            test_cases = [
-              { input: 'әөіңғүұқһ', expected: 'äöıŋğüūqh' },
-              { input: 'ӘӨІҢҒҮҰҚҺ', expected: 'ÄÖIŊĞÜŪQH' }
-            ]
-            
-            test_cases.each do |test_case|
-              post '/transliterate', { text: test_case[:input] }.to_json, { 'CONTENT_TYPE' => 'application/json' }
-              assert_equal 200, last_response.status
-              response = JSON.parse(last_response.body)
-              assert_equal test_case[:input], response['original']
-              assert_equal test_case[:expected], response['transliterated']
-            end
-          end
-          
-          def test_mixed_text
-            post '/transliterate', { text: 'Қазақстан Республикасы' }.to_json, { 'CONTENT_TYPE' => 'application/json' }
-            assert_equal 200, last_response.status
-            response = JSON.parse(last_response.body)
-            assert_equal 'Қазақстан Республикасы', response['original']
-            assert_equal 'Qazaqstan Respublikasy', response['transliterated']
-          end
-          
-          def test_invalid_json
-            post '/transliterate', 'invalid json', { 'CONTENT_TYPE' => 'application/json' }
-            assert_equal 500, last_response.status
-          end
-        end
-        EOL
+      run: bundle install
     
     - name: Run tests
       run: ruby test_app.rb
-
-    - name: Start application (health check)
+    
+    - name: Test API endpoints
       run: |
         bundle exec ruby app.rb &
-        sleep 5
-        curl -X POST -H "Content-Type: application/json" -d '{"text":"Сәлем әлем"}' http://localhost:4567/transliterate || true
+        sleep 3
+        
+        # Test health endpoint
+        curl -f http://localhost:4567/health
+        
+        # Test transliteration
+        curl -X POST -H "Content-Type: application/json" \
+             -d '{"text":"Сәлем әлем"}' \
+             http://localhost:4567/transliterate
